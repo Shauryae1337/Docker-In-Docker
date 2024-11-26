@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docker in Docker Deployment </title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f7fc;
+        }
+
+        header {
+            background-color: #343a40;
+            color: #fff;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 30px auto;
+            padding: 20px;
+            background-color: #fff;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            width: 70%;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            margin-right: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+        }
+
+        button.deploy {
+            background-color: #007bff;
+            color: white;
+        }
+
+        button.deploy:hover {
+            background-color: #0056b3;
+        }
+
+        button.stop {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        button.stop:hover {
+            background-color: #c82333;
+        }
+
+        button.delete {
+            background-color: #ffc107;
+            color: white;
+        }
+
+        button.delete:hover {
+            background-color: #e0a800;
+        }
+
+        table {
+            width: 100%;
+            margin-top: 30px;
+            border-collapse: collapse;
+        }
+
+        table th, table td {
+            padding: 12px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+
+        .status {
+            font-weight: bold;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            font-size: 20px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .loading i {
+            font-size: 30px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .url {
+            margin-top: 20px;
+            font-size: 16px;
+            color: #007bff;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Docker in Docker | Deployment Manager</h1> 
+    <h3>[ Proof of Concept ]</h3>
+
+</header>
+
+<div class="container">
+    <h2>Deploy New Repository</h2>
+    <div class="input-group">
+        <input type="text" id="repoInput" placeholder="Enter username/repository (e.g., user/repo)">
+        <button class="deploy" onclick="deployInstance()">Deploy</button>
+    </div>
+    <div class="loading" id="loading">
+        <i class="fas fa-spinner"></i> Creating Instance...
+    </div>
+
+    <div class="url" id="deploymentUrl"></div>
+
+    <h2>Running Containers</h2>
+    <button onclick="loadContainers()">Load Instances</button>
+    <table id="containersTable">
+        <thead>
+            <tr>
+                <th>Container ID</th>
+                <th>Repo</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Dynamic rows will be added here -->
+        </tbody>
+    </table>
+</div>
+
+<script>
+    // Function to add timeout to a fetch request (5 minutes = 300,000 ms)
+    function fetchWithTimeout(url, options, timeout = 300000) { // 5 minutes timeout
+        return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error('Request timed out'));
+            }, timeout);
+
+            fetch(url, options)
+                .then(response => {
+                    clearTimeout(timeoutId);
+                    resolve(response);
+                })
+                .catch(error => {
+                    clearTimeout(timeoutId);
+                    reject(error);
+                });
+        });
+    }
+
+    // Deploy new instance with a proper timeout
+    async function deployInstance() {
+        const repo = document.getElementById('repoInput').value;
+        if (!repo) {
+            alert('Please enter a repository!');
+            return;
+        }
+
+        // Show loading animation
+        document.getElementById('loading').classList.add('show');
+        document.getElementById('deploymentUrl').innerHTML = '';  // Clear previous URL
+
+        try {
+            const response = await fetchWithTimeout('/deploy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username_repo: repo })
+            }, 300000); // 5 minutes timeout
+
+            const data = await response.json();
+            document.getElementById('loading').classList.remove('show');
+
+            if (data.url) {
+                // Show instance created message and URL
+                document.getElementById('deploymentUrl').innerHTML = `Instance created successfully! Deployment URL: <a href="${data.url}" target="_blank">${data.url}</a>`;
+
+                // Trigger loadContainers to refresh the container list
+                loadContainers();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        } catch (error) {
+            document.getElementById('loading').classList.remove('show');
+            alert('Error: ' + error.message);
+        }
+    }
+
+    // Load running containers with a proper timeout
+    async function loadContainers() {
+        try {
+            const response = await fetchWithTimeout('/load_containers', { method: 'GET' }, 300000); // 5 minutes timeout
+            const data = await response.json();
+
+            const containersTable = document.getElementById('containersTable').getElementsByTagName('tbody')[0];
+            containersTable.innerHTML = ''; // Clear previous table rows
+
+            data.containers.forEach(container => {
+                const row = containersTable.insertRow();
+
+                const idCell = row.insertCell(0);
+                idCell.textContent = container.id;
+
+                const repoCell = row.insertCell(1);
+                repoCell.textContent = container.repo;
+
+                const statusCell = row.insertCell(2);
+                statusCell.textContent = container.status;
+                statusCell.classList.add('status');
+
+                // Add URL column with the hardcoded URL
+                const urlCell = row.insertCell(3);
+                const urlLink = document.createElement('a');
+                urlLink.href = 'http://192.168.172.128';  // Hardcoded URL
+                urlLink.textContent = 'http://192.168.172.128';  // Text for the link
+                urlLink.target = "_blank";  // Open in a new tab
+                urlCell.appendChild(urlLink);
+
+                const actionsCell = row.insertCell(4);
+                const stopBtn = document.createElement('button');
+                stopBtn.textContent = 'Stop';
+                stopBtn.classList.add('stop');
+                stopBtn.onclick = () => stopContainer(container.id);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.classList.add('delete');
+                deleteBtn.onclick = () => deleteContainer(container.id);
+
+                actionsCell.appendChild(stopBtn);
+                actionsCell.appendChild(deleteBtn);
+            });
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    // Stop container
+    async function stopContainer(containerId) {
+        try {
+            const response = await fetch('/stop_container', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ container_id: containerId })
+            });
+            const data = await response.json();
+            alert(data.message || data.error);
+            loadContainers();  // Refresh the containers list
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+
+    // Delete container
+    async function deleteContainer(containerId) {
+        try {
+            const response = await fetch('/delete_container', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ container_id: containerId })
+            });
+            const data = await response.json();
+            alert(data.message || data.error);
+            loadContainers();  // Refresh the containers list
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    }
+</script>
+
+</body>
+</html>
+
